@@ -1,0 +1,7 @@
+.terraform/
+*.tfstate
+*.tfstate.*
+*.plan
+plan.txt
+.terraform.lock.hcl
+*.retry

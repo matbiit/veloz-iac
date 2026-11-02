@@ -1,0 +1,30 @@
+# Modelo PULL (GitOps) para os microsserviços da VeloZ em Kubernetes - caso do material.
+# O ArgoCD roda DENTRO do cluster, observa este repositório e reconcilia continuamente.
+# Ninguém precisa de credencial de produção no laptop ou no CI: o cluster "puxa" o estado.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: vitrine-prod
+  namespace: argocd
+spec:
+  project: ecommerce
+  source:
+    repoURL: https://github.com/veloz/deploy-manifests.git
+    targetRevision: main          # Git é a fonte única da verdade
+    path: apps/vitrine/overlays/prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: vitrine
+  syncPolicy:
+    automated:
+      prune: true                 # o que saiu do Git sai do cluster
+      selfHeal: true              # mudança manual no cluster (kubectl edit) é DESFEITA -> fim do drift
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:                    # backoff exponencial: lição do incidente do Google Cloud (jun/2025)
+        duration: 10s
+        factor: 2
+        maxDuration: 5m
+  # Rollback = git revert do commit problemático. O ArgoCD aplica sozinho.

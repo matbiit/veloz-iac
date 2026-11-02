@@ -1,0 +1,6 @@
+# Quem PRECISA aprovar cada parte da infraestrutura (ative em Branch protection > Require review from Code Owners)
+*                               @veloz/plataforma
+/terraform/modules/             @veloz/plataforma
+/infra-dados/                   @veloz/dados @veloz/seguranca
+/policies/                      @veloz/seguranca
+/.github/workflows/             @veloz/plataforma @veloz/seguranca

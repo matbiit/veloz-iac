@@ -1,0 +1,82 @@
+# Pipeline GitOps de infraestrutura da VeloZ.
+# Fluxo: branch -> pull request -> portões automáticos -> revisão (CODEOWNERS) -> merge -> apply.
+# Ninguém roda `apply` do laptop; as credenciais de produção ficam só aqui (secrets/OIDC).
+name: iac
+
+on:
+  pull_request:
+    paths: ["terraform/**", "infra-dados/**", "policies/**", ".github/workflows/iac.yml"]
+  push:
+    branches: [main]
+    paths: ["terraform/**", "infra-dados/**", "policies/**"]
+
+permissions:
+  contents: read
+  pull-requests: write # para comentar o plan no PR
+
+jobs:
+  portoes:
+    name: Portões de qualidade e segurança
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: opentofu/setup-opentofu@v1 # ou hashicorp/setup-terraform@v3
+
+      - name: 1) Formatação
+        run: tofu fmt -check -recursive
+
+      - name: 2) Validação de sintaxe e tipos
+        run: |
+          for d in terraform infra-dados; do
+            (cd $d && tofu init -backend=false -input=false >/dev/null && tofu validate)
+          done
+
+      - name: 3) Lint (tflint)
+        uses: terraform-linters/setup-tflint@v4
+      - run: tflint --recursive --minimum-failure-severity=warning
+
+      - name: 4) Segurança estática (checkov - centenas de regras de mercado)
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: .
+          framework: terraform
+          skip_path: exercicio-axion # material didático propositalmente inseguro
+
+      - name: 5) Políticas da empresa (OPA / conftest)
+        run: |
+          curl -sSL https://github.com/open-policy-agent/conftest/releases/download/v0.62.0/conftest_0.62.0_Linux_x86_64.tar.gz | tar xz conftest
+          ./conftest verify -p policies
+          ./conftest test --parser hcl2 -p policies infra-dados/*.tf
+
+  plano:
+    name: Plan comentado no PR
+    needs: portoes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opentofu/setup-opentofu@v1
+      - name: Plan do ambiente dev
+        id: plan
+        working-directory: terraform
+        run: |
+          tofu init -input=false
+          tofu workspace select -or-create dev
+          tofu plan -no-color -var-file=envs/dev.tfvars | tee plan.txt
+      - name: Publicar plan no PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const plano = require('fs').readFileSync('terraform/plan.txt', 'utf8').slice(-60000);
+            await github.rest.issues.createComment({
+              ...context.repo, issue_number: context.issue.number,
+              body: "### Plano de infraestrutura (dev)\n```hcl\n" + plano + "\n```\nRevisores: confiram *destroy* e *replace* antes de aprovar."
+            });
+
+  # Em produção, o apply roda SOMENTE após o merge na main, com aprovação de ambiente:
+  # aplicar:
+  #   needs: portoes
+  #   if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+  #   environment: producao          # Settings > Environments > Required reviewers
+  #   steps: [... tofu apply -auto-approve plan.out ...]

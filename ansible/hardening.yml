@@ -1,0 +1,102 @@
+# ============================================================================
+# CASO GHS (registros médicos) - baseline de hardening idempotente
+# Substitui "scripts shell + wiki" por estado desejado declarado e auditável.
+#
+#   ansible-playbook -i inventario.ini hardening.yml --check --diff   # auditoria: o que está fora do padrão?
+#   ansible-playbook -i inventario.ini hardening.yml                  # corrige o drift
+#   ansible-playbook -i inventario.ini hardening.yml                  # 2a execução: changed=0 (idempotência)
+# ============================================================================
+- name: Baseline de seguranca GHS
+  hosts: servidores
+  become: true
+  gather_facts: true
+
+  vars:
+    app_usuario: ghs-app
+    app_dir: /opt/ghs
+    pacotes_obrigatorios: [chrony, unattended-upgrades, auditd]
+    pacotes_proibidos: [telnet, ftp, rsh-client]
+
+  handlers:
+    - name: Recarregar sysctl
+      ansible.builtin.command: sysctl --system
+      changed_when: true
+      failed_when: false # em containers o kernel é compartilhado; em VM real isso aplica
+
+    - name: Reiniciar sshd
+      ansible.builtin.service:
+        name: ssh
+        state: restarted
+      failed_when: false
+
+  tasks:
+    - name: Pacotes obrigatórios (NTP, patches automáticos, auditoria)
+      ansible.builtin.apt:
+        name: "{{ pacotes_obrigatorios }}"
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+      tags: [pacotes]
+
+    - name: Pacotes inseguros ausentes
+      ansible.builtin.apt:
+        name: "{{ pacotes_proibidos }}"
+        state: absent
+      tags: [pacotes]
+
+    - name: Usuário de serviço sem login interativo
+      ansible.builtin.user:
+        name: "{{ app_usuario }}"
+        shell: /usr/sbin/nologin
+        system: true
+        create_home: false
+
+    - name: Diretório da aplicação com permissão mínima (achado de auditoria nº 1)
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ app_usuario }}"
+        group: "{{ app_usuario }}"
+        mode: "0750"
+
+    - name: Diretório de dados de pacientes (PHI) - somente o dono
+      ansible.builtin.file:
+        path: "{{ app_dir }}/dados"
+        state: directory
+        owner: "{{ app_usuario }}"
+        group: "{{ app_usuario }}"
+        mode: "0700"
+
+    - name: Parâmetros de kernel de rede (template versionado)
+      ansible.builtin.template:
+        src: templates/99-ghs-hardening.conf.j2
+        dest: /etc/sysctl.d/99-ghs-hardening.conf
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Recarregar sysctl
+
+    - name: Aviso legal no login (exigência de compliance)
+      ansible.builtin.copy:
+        dest: /etc/issue.net
+        content: |
+          Sistema de uso restrito GHS. Acessos são monitorados e auditados.
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Verifica se o servidor tem SSH
+      ansible.builtin.stat:
+        path: /usr/sbin/sshd
+      register: sshd_bin
+
+    - name: SSH endurecido (sem root, sem senha)
+      ansible.builtin.template:
+        src: templates/99-ghs-sshd.conf.j2
+        dest: /etc/ssh/sshd_config.d/99-ghs.conf
+        owner: root
+        group: root
+        mode: "0600"
+        validate: /usr/sbin/sshd -t -f %s
+      when: sshd_bin.stat.exists
+      notify: Reiniciar sshd
