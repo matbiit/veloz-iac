@@ -10,7 +10,8 @@ garantir que nenhum bucket de dados de clientes vá parar na internet e acabar c
 |---|---|---|
 | `terraform/` | loja VeloZ (vitrine + cache) em Docker, com módulo reutilizável e `.tfvars` por ambiente | Pulsar (drift), módulos, plan/apply/destroy, workspaces |
 | `infra-dados/` | bucket S3 de exports de clientes “seguro por padrão” | Axion Data (gabarito) |
-| `exercicio-axion/` | o mesmo bucket gerado por IA, inseguro (fora do pipeline) | Exercício em grupo |
+| `exercicio-axion/` | o mesmo bucket gerado por IA, inseguro (fora do pipeline) | Desafio individual |
+| `docs/ADR-002-politica-de-mudancas-em-producao.md` | política de mudanças: console x PR x break-glass | Decisão executiva (Bloco 1) |
 | `policies/` | regras OPA/Rego da empresa + testes das regras | Políticas como código |
 | `ansible/` | baseline de hardening idempotente | GHS (HIPAA/LGPD, drift em 15% dos servidores) |
 | `gitops/` | `Application` do ArgoCD com `selfHeal` | VeloZ (deploy manual derrubou produção) |
@@ -82,15 +83,16 @@ Estado remoto com lock para times (caso Axion: tfstate por e-mail): veja `terraf
 
 ---
 
-## Tutorial 2 — Segurança e políticas como código (Bloco 2, em grupos)
+## Tutorial 2 — Segurança e políticas como código (Blocos 2 e 3)
 
 ```bash
 checkov -d exercicio-axion --framework terraform --compact          # ~13 falhas de mercado
 conftest test --parser hcl2 -p policies exercicio-axion/main.tf     # 7 falhas das regras da empresa
 conftest verify -p policies                                         # as próprias regras têm teste
 ```
-**Missão do grupo (20 min):** corrigir `exercicio-axion/main.tf` até `conftest` passar e o `checkov`
+**Desafio individual (15 min, Bloco 3):** corrigir `exercicio-axion/main.tf` até `conftest` passar e o `checkov`
 ficar só com exceções **justificadas** (`#checkov:skip=ID:motivo`). Gabarito: `infra-dados/main.tf`.
+Sem ambiente? Trilha de revisão: leia `infra-dados/main.tf` e responda no formulário que regra cada recurso novo atende.
 
 ---
 

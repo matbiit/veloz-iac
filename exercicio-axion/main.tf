@@ -5,7 +5,7 @@
 # Ele É VÁLIDO (terraform validate passa) e FUNCIONA... e é exatamente o tipo de código
 # que expôs dados de clientes por dias na Axion Data.
 #
-# MISSÃO DO GRUPO: rodar checkov + conftest, entender cada falha e corrigir.
+# DESAFIO INDIVIDUAL: rodar checkov + conftest, entender cada falha e corrigir (15 min).
 # (Não precisa de conta AWS: as ferramentas analisam o código, não a nuvem.)
 # ============================================================================
 
