@@ -36,7 +36,7 @@ variable "replicas" {
 }
 
 variable "rede" {
-  description = "Nome da rede Docker compartilhada"
+  description = "Nome da rede Podman compartilhada"
   type        = string
 }
 
