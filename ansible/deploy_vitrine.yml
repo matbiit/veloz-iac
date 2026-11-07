@@ -1,0 +1,81 @@
+# ============================================================================
+# Deploy da vitrine com Podman - Ansible declarando o ESTADO DESEJADO dos containers
+# (coleção containers.podman, que já vem no pacote `ansible`).
+#
+#   ansible-playbook deploy_vitrine.yml                          # sobe hml com 2 réplicas
+#   ansible-playbook deploy_vitrine.yml                          # de novo: changed=0 (idempotente)
+#   ansible-playbook deploy_vitrine.yml --check --diff           # auditoria: o que está fora do padrão?
+#   ansible-playbook deploy_vitrine.yml -e versao=1.5.0          # nova versão: rebuild + troca 1 réplica por vez
+#   ansible-playbook deploy_vitrine.yml -e estado=absent         # remove tudo
+#
+# Terraform x Ansible na mesma aula: o Terraform criou a "loja" (rede, cache, vitrine base);
+# o Ansible faz o que ele faz melhor: construir a imagem, configurar e atualizar em ondas.
+# ============================================================================
+- name: Vitrine VeloZ em Podman
+  hosts: servidores
+  gather_facts: false
+  serial: 1 # um host por vez; em produção, o rollout por ondas evita derrubar tudo junto
+
+  vars:
+    ambiente: hml
+    versao: "1.4.0"
+    replicas: 2
+    porta_base: 8180
+    estado: started # started | absent
+    rede: "{{ ambiente }}-veloz-ansible"
+    imagem: "localhost/veloz-vitrine:{{ versao }}"
+    labels_obrigatorios:
+      veloz.owner: squad-vitrine
+      veloz.cost_center: CC-1020-ECOMMERCE
+      veloz.ambiente: "{{ ambiente }}"
+      veloz.gerenciado: ansible
+
+  tasks:
+    - name: Rede do ambiente
+      containers.podman.podman_network:
+        name: "{{ rede }}"
+        state: "{{ 'absent' if estado == 'absent' else 'present' }}"
+      when: estado != 'absent'
+
+    - name: Imagem da vitrine construída a partir do Containerfile versionado
+      containers.podman.podman_image:
+        name: localhost/veloz-vitrine
+        tag: "{{ versao }}"
+        path: "{{ playbook_dir }}/../vitrine"
+        build:
+          format: docker
+      when: estado != 'absent'
+
+    - name: Réplicas da vitrine (uma de cada vez)
+      containers.podman.podman_container:
+        name: "{{ ambiente }}-vitrine-ansible-{{ item }}"
+        image: "{{ imagem }}"
+        state: "{{ estado }}"
+        network: "{{ rede }}"
+        ports:
+          - "{{ porta_base + item }}:80"
+        env:
+          AMBIENTE: "{{ ambiente }}"
+          VERSAO: "{{ versao }}"
+        labels: "{{ labels_obrigatorios | combine({'veloz.versao': versao}) }}"
+        restart_policy: unless-stopped
+      loop: "{{ range(replicas) | list }}"
+      loop_control:
+        label: "{{ ambiente }}-vitrine-ansible-{{ item }} -> {{ versao }}"
+
+    - name: Rede removida ao desligar o ambiente
+      containers.podman.podman_network:
+        name: "{{ rede }}"
+        state: absent
+      when: estado == 'absent'
+
+    - name: Smoke test de cada réplica
+      ansible.builtin.uri:
+        url: "http://localhost:{{ porta_base + item }}/"
+        return_content: false
+      register: smoke
+      retries: 5
+      delay: 1
+      until: smoke.status == 200
+      loop: "{{ range(replicas) | list }}"
+      when: estado == 'started' and not ansible_check_mode

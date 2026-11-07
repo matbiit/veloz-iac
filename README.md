@@ -1,132 +1,133 @@
-# Aula 2 — VeloZ: da console ao pull request (IaC + GitOps)
+# Aula 2 — Da console ao pull request (VeloZ: IaC + GitOps)
 
 **MBA em Arquitetura e Engenharia de Software · Engenharia de Software Moderna**
 
 A VeloZ precisa subir um **ambiente de teste de carga para a Black Friday (27/11/2026)**,
 garantir que nenhum bucket de dados de clientes vá parar na internet e acabar com o
 *drift* manual nos servidores. Tudo como código, revisado em pull request.
+**Sem Docker:** containers com **Podman** (sem daemon, rootless).
 
-| Pasta | O que tem | Caso / conceito |
+## Mapa de código por tema da aula
+
+| Tema | Arquivo para projetar | Comando para rodar ao vivo |
 |---|---|---|
-| `terraform/` | loja VeloZ (vitrine + cache) em Docker, com módulo reutilizável e `.tfvars` por ambiente | Pulsar (drift), módulos, plan/apply/destroy, workspaces |
-| `infra-dados/` | bucket S3 de exports de clientes “seguro por padrão” | Axion Data (gabarito) |
-| `exercicio-axion/` | o mesmo bucket gerado por IA, inseguro (fora do pipeline) | Desafio individual |
-| `docs/ADR-002-politica-de-mudancas-em-producao.md` | política de mudanças: console x PR x break-glass | Decisão executiva (Bloco 1) |
-| `policies/` | regras OPA/Rego da empresa + testes das regras | Políticas como código |
-| `ansible/` | baseline de hardening idempotente | GHS (HIPAA/LGPD, drift em 15% dos servidores) |
-| `gitops/` | `Application` do ArgoCD com `selfHeal` | VeloZ (deploy manual derrubou produção) |
-| `.github/` | pipeline de portões + `CODEOWNERS` | GitOps, governança |
+| **Podman** (runtime sem daemon) | `vitrine/Containerfile` | `podman build --format docker -t localhost/veloz-vitrine:1.4.0 vitrine/` |
+| **Terraform — módulo da plataforma** | `terraform/modules/servico-web/` | `terraform plan -var-file=envs/dev.tfvars` |
+| **Terraform — ambientes e estado** | `terraform/envs/*.tfvars`, `terraform/backend.tf` | `terraform workspace new blackfriday` |
+| **Ansible — deploy com Podman** | `ansible/deploy_vitrine.yml` | `ansible-playbook deploy_vitrine.yml` |
+| **Ansible — hardening e auditoria** | `ansible/hardening.yml` | `ansible-playbook hardening.yml --check --diff` |
+| **Políticas como código (nuvem)** | `policies/s3.rego` + testes | `conftest test --parser hcl2 -p policies exercicio-axion/main.tf` |
+| **Políticas como código (deploy)** | `policies/kube.rego` + testes | `conftest test -p policies --namespace kubernetes gitops/apps/*.yaml` |
+| **GitOps pull (agente)** | `gitops/reconciliador.py` + `gitops/apps/vitrine.yaml` | `python gitops/reconciliador.py --repo . --intervalo 10` |
+| **GitOps em produção** | `gitops/argocd-vitrine.yaml` | (ArgoCD num cluster) |
+| **Pipeline e governança** | `.github/workflows/iac.yml`, `.github/CODEOWNERS` | `bash scripts/verificar.sh` |
+| **Decisão executiva** | `docs/ADR-002-politica-de-mudancas-em-producao.md` | — |
 
-Branch `demo/bucket-gerado-por-ia`: PR “urgente” que um assistente de IA gerou com bucket público → pipeline vermelho.
+| Outras pastas | O que tem |
+|---|---|
+| `infra-dados/` | bucket S3 de exports de clientes "seguro por padrão" (gabarito do desafio) |
+| `exercicio-axion/` | o mesmo bucket gerado por IA, inseguro (desafio individual; fora do pipeline) |
+| branch `demo/bucket-gerado-por-ia` | PR "urgente" com bucket público → pipeline vermelho |
 
-> **Terraform ou OpenTofu?** Os comandos são idênticos (`terraform` ↔ `tofu`). O OpenTofu é o fork open source
-> (Linux Foundation) criado após a mudança de licença da HashiCorp (BSL, 2023); a HashiCorp hoje pertence à IBM.
-> Use o que sua empresa adota — o conteúdo da aula vale para os dois.
+> **Terraform ou OpenTofu?** Os comandos são idênticos (`terraform` ↔ `tofu`). Tudo aqui foi testado com OpenTofu 1.10 e Podman 4.9.
+>
+> **Por que o provider se chama `docker`?** O Podman expõe uma API compatível com a do Docker. O provider `kreuzwerker/docker`
+> só conversa por HTTP com o socket do Podman; nenhum Docker é instalado. Três ajustes no módulo tornam isso estável:
+> `ports.ip = ""`, `pid_mode = "private"` e `lifecycle.ignore_changes` no IPAM da rede (comentados no código).
 
 ---
 
 ## Tutorial 0 — Ambiente (faça ANTES da aula)
 
-**GitHub Codespaces (recomendado):** o Codespace padrão já tem Docker. No terminal:
+**GitHub Codespaces ou Linux (Ubuntu/Debian):**
 ```bash
+sudo apt-get update && sudo apt-get install -y podman
 # Terraform (ou OpenTofu: https://opentofu.org/docs/intro/install/)
-sudo apt-get update && sudo apt-get install -y gnupg software-properties-common
 wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp.gpg
 echo "deb [signed-by=/usr/share/keyrings/hashicorp.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
 sudo apt-get update && sudo apt-get install -y terraform
-
-pip install checkov ansible-core
+pip install ansible checkov pyyaml          # o pacote "ansible" já traz a coleção containers.podman
 curl -sSL https://github.com/open-policy-agent/conftest/releases/download/v0.62.0/conftest_0.62.0_Linux_x86_64.tar.gz | tar xz conftest && sudo mv conftest /usr/local/bin/
-docker pull nginx:1.27-alpine && docker pull redis:7.4-alpine     # evita esperar download ao vivo
+podman pull docker.io/library/nginx:1.27-alpine docker.io/library/redis:7.4-alpine
+bash scripts/podman-api.sh                  # API do Podman para o Terraform (use --root se o rootless falhar)
 ```
-**Local:** Docker Desktop + os mesmos binários (Windows: use WSL2).
+**macOS/Windows:** Podman Desktop + `podman machine init && podman machine start`; o socket aparece em `podman machine inspect`.
+Se o seu ambiente rootless não tiver delegação de cgroup (erro de limite de memória), use `-var limitar_memoria=false`.
 
 ---
 
-## Tutorial 1 — Terraform: init → plan → apply → destroy (Bloco 1)
+## Tutorial 1 — Podman em 5 comandos
+
+```bash
+podman run -d --name teste -p 8085:80 docker.io/library/nginx:1.27-alpine   # sem daemon, sem root
+podman ps                                                                    # processo do seu usuário
+podman generate kube teste > /tmp/teste.yaml                                 # vira YAML de Kubernetes
+podman rm -f teste && podman kube play /tmp/teste.yaml                       # e volta a rodar a partir do YAML
+podman kube down /tmp/teste.yaml
+```
+
+## Tutorial 2 — Terraform: init → plan → apply → destroy
 
 ```bash
 cd terraform
-terraform init                                   # baixa o provider docker (kreuzwerker/docker)
-terraform workspace new dev                      # um estado por ambiente
-terraform plan  -var-file=envs/dev.tfvars -out=dev.plan
+terraform init
+terraform workspace new dev
+terraform plan -var-file=envs/dev.tfvars -out=dev.plan     # Plan: 5 to add (rede, 2 imagens, vitrine-0, cache-0)
 terraform apply dev.plan
-curl localhost:8080                              # vitrine no ar
-docker ps --format '{{.Names}}\t{{.Labels}}'     # labels de owner/cost_center em tudo
+curl localhost:8080
+podman ps --format '{{.Names}}  {{.Labels}}'               # labels de owner/cost_center em tudo
+terraform plan -var-file=envs/dev.tfvars                   # No changes: idempotência
 ```
+**Drift (caso Pulsar):** `podman rm -f dev-vitrine-0` → `terraform plan` mostra `1 to add` → `terraform apply` corrige.
+**Guarda-corpo:** `terraform plan -var-file=envs/dev.tfvars -var imagem_vitrine=docker.io/library/nginx:latest` → `Invalid value for variable`.
+**Ambiente efêmero:** `terraform workspace new blackfriday && terraform apply -var-file=envs/blackfriday.tfvars` (8 recursos, portas 9080–9083) → `terraform destroy ...`.
+Estado remoto com lock (caso Axion): `terraform/backend.tf`.
 
-**Idempotência** — rode de novo, nada muda:
-```bash
-terraform plan -var-file=envs/dev.tfvars         # "No changes. Your infrastructure matches the configuration."
-```
-
-**Drift (caso Pulsar)** — alguém “resolveu na mão”:
-```bash
-docker rm -f dev-vitrine-0
-terraform plan -var-file=envs/dev.tfvars         # "Plan: 1 to add" -> o código denuncia o desvio
-terraform apply -var-file=envs/dev.tfvars -auto-approve
-```
-
-**Guarda-corpo no módulo** — tag `latest` é recusada antes de criar qualquer coisa:
-```bash
-terraform plan -var-file=envs/dev.tfvars -var imagem_vitrine=nginx:latest    # Error: Invalid value for variable
-```
-
-**Ambiente efêmero de Black Friday** — mesmo código, outro `.tfvars`:
-```bash
-terraform workspace new blackfriday
-terraform apply -var-file=envs/blackfriday.tfvars -auto-approve     # 4 réplicas nas portas 9080-9083
-curl localhost:9083
-terraform destroy -var-file=envs/blackfriday.tfvars -auto-approve   # custo zero depois do teste
-```
-Estado remoto com lock para times (caso Axion: tfstate por e-mail): veja `terraform/backend.tf`.
-
----
-
-## Tutorial 2 — Segurança e políticas como código (Blocos 2 e 3)
-
-```bash
-checkov -d exercicio-axion --framework terraform --compact          # ~13 falhas de mercado
-conftest test --parser hcl2 -p policies exercicio-axion/main.tf     # 7 falhas das regras da empresa
-conftest verify -p policies                                         # as próprias regras têm teste
-```
-**Desafio individual (15 min, Bloco 3):** corrigir `exercicio-axion/main.tf` até `conftest` passar e o `checkov`
-ficar só com exceções **justificadas** (`#checkov:skip=ID:motivo`). Gabarito: `infra-dados/main.tf`.
-Sem ambiente? Trilha de revisão: leia `infra-dados/main.tf` e responda no formulário que regra cada recurso novo atende.
-
----
-
-## Tutorial 3 — Pipeline GitOps no GitHub (Bloco 3)
-
-1. Suba o repositório: `gh repo create veloz-iac --private --source . --push`
-2. **Settings → Branches → Add rule (main):** *Require a pull request*, *Require status checks* (`Portões de qualidade e segurança`), *Require review from Code Owners*.
-3. Abra o PR da IA:
-   ```bash
-   git push origin demo/bucket-gerado-por-ia
-   gh pr create --head demo/bucket-gerado-por-ia --title "bucket relatórios parceiros BF" --body "urgente"
-   ```
-4. Na aba **Checks**: checkov e conftest bloqueiam o merge. A mensagem `[SEG-001]` explica o porquê.
-5. Para rodar os portões localmente: `bash scripts/verificar.sh`.
-
----
-
-## Tutorial 4 — Ansible: idempotência e drift em servidores (caso GHS)
+## Tutorial 3 — Ansible com Podman
 
 ```bash
 cd ansible
-sudo ansible-playbook hardening.yml --check --diff     # AUDITORIA: o que está fora do padrão (nada é alterado)
-sudo ansible-playbook hardening.yml                    # aplica: changed=N
-sudo ansible-playbook hardening.yml                    # de novo: changed=0  <- idempotência
-sudo chmod 777 /opt/ghs                                # simula "ajuste" manual
-sudo ansible-playbook hardening.yml --check --diff     # mostra: mode 0777 -> 0750
-sudo ansible-playbook hardening.yml                    # corrige: changed=1
+ansible-playbook deploy_vitrine.yml                     # build da imagem + 2 réplicas (portas 8180, 8181): changed=3
+ansible-playbook deploy_vitrine.yml                     # changed=0 (idempotente)
+podman stop hml-vitrine-ansible-1                       # alguém "mexeu"
+ansible-playbook deploy_vitrine.yml --check --diff      # auditoria: aponta a réplica parada, sem alterar nada
+ansible-playbook deploy_vitrine.yml                     # corrige: changed=1
+ansible-playbook deploy_vitrine.yml -e versao=1.5.0     # nova versão, uma réplica por vez
+ansible-playbook deploy_vitrine.yml -e estado=absent    # remove tudo
+sudo ansible-playbook hardening.yml --check --diff      # caso GHS: baseline de segurança (use --skip-tags pacotes sem internet)
 ```
-Sem internet para `apt`? Acrescente `--skip-tags pacotes`.
 
----
+## Tutorial 4 — Políticas como código
 
-## Tutorial 5 — GitOps pull com ArgoCD (discussão)
+```bash
+conftest verify -p policies                                                    # as próprias regras têm teste (9)
+checkov -d exercicio-axion --framework terraform --compact                     # 13 falhas de mercado
+conftest test --parser hcl2 -p policies exercicio-axion/main.tf                # 7 falhas das regras da empresa
+conftest test -p policies --namespace kubernetes gitops/apps/vitrine.yaml      # manifesto de deploy: aprovado
+```
+**Desafio individual (13 min):** corrigir `exercicio-axion/main.tf` até o `conftest` passar e o `checkov` ficar só com
+exceções justificadas (`#checkov:skip=ID:motivo`). Gabarito: `infra-dados/main.tf`.
+Sem ambiente? Trilha de revisão: leia `infra-dados/main.tf` e responda no formulário que regra cada recurso novo atende.
 
-`gitops/argocd-vitrine.yaml` mostra o modelo *pull*: `selfHeal: true` desfaz qualquer `kubectl edit`
-manual (o erro que derrubou a VeloZ por 2 horas) e o rollback vira `git revert`.
-Para testar de verdade: `kind create cluster` + instalação do ArgoCD (https://argo-cd.readthedocs.io/en/stable/getting_started/).
+## Tutorial 5 — GitOps pull com o agente da aula
+
+```bash
+python gitops/reconciliador.py --repo . --intervalo 10        # em outro terminal; observa a branch main
+curl localhost:8090                                           # VeloZ vitrine - prod - 1.4.0
+```
+| Faça | O agente mostra |
+|---|---|
+| `podman pod stop vitrine-pod` | `SELFHEAL` e recria o pod |
+| altere `VERSAO` para `"1.5.0"` em `gitops/apps/vitrine.yaml` e faça commit | `SYNC` e `curl` mostra 1.5.0 |
+| troque a imagem para `...nginx:latest` e faça commit | `BLOQUEADO ... [K8S-001]`; a versão anterior continua no ar |
+| `git revert HEAD` | volta ao estado aprovado |
+| `git rm gitops/apps/vitrine.yaml` e commit | `PRUNE`: o que saiu do Git sai do ambiente |
+
+Em produção, o mesmo papel é do ArgoCD ou do Flux dentro do cluster (`gitops/argocd-vitrine.yaml`).
+
+## Tutorial 6 — Pipeline e governança no GitHub
+
+1. `gh repo create veloz-iac --private --source . --push` e `git push origin demo/bucket-gerado-por-ia`.
+2. **Settings → Branches (main):** exigir PR, o check "Portões de qualidade e segurança" e revisão de Code Owners.
+3. `gh pr create --head demo/bucket-gerado-por-ia --title "bucket relatórios parceiros BF" --body "urgente"` → checkov e conftest bloqueiam.
+4. Portões localmente: `bash scripts/verificar.sh`.

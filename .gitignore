@@ -5,3 +5,5 @@
 plan.txt
 .terraform.lock.hcl
 *.retry
+.gitops-estado/
+.gitops-repo/

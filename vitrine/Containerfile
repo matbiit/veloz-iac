@@ -1,0 +1,6 @@
+# Imagem da vitrine VeloZ (site estático) - build com Podman, sem Docker.
+#   podman build --format docker -t localhost/veloz-vitrine:1.4.0 vitrine/
+FROM docker.io/library/nginx:1.27-alpine
+LABEL org.opencontainers.image.title="veloz-vitrine" veloz.owner="squad-vitrine"
+COPY index.html /usr/share/nginx/html/index.html
+EXPOSE 80

@@ -5,10 +5,10 @@ name: iac
 
 on:
   pull_request:
-    paths: ["terraform/**", "infra-dados/**", "policies/**", ".github/workflows/iac.yml"]
+    paths: ["terraform/**", "infra-dados/**", "policies/**", "ansible/**", "gitops/**", "vitrine/**", ".github/workflows/iac.yml"]
   push:
     branches: [main]
-    paths: ["terraform/**", "infra-dados/**", "policies/**"]
+    paths: ["terraform/**", "infra-dados/**", "policies/**", "ansible/**", "gitops/**", "vitrine/**"]
 
 permissions:
   contents: read
@@ -48,6 +48,13 @@ jobs:
           curl -sSL https://github.com/open-policy-agent/conftest/releases/download/v0.62.0/conftest_0.62.0_Linux_x86_64.tar.gz | tar xz conftest
           ./conftest verify -p policies
           ./conftest test --parser hcl2 -p policies infra-dados/*.tf
+          ./conftest test -p policies --namespace kubernetes gitops/apps/*.yaml   # manifestos do GitOps
+
+      - name: 6) Ansible - sintaxe e boas práticas
+        run: |
+          pip install ansible ansible-lint
+          ansible-playbook --syntax-check -i ansible/inventario.ini ansible/*.yml
+          ansible-lint ansible/ || true   # informativo na aula; em produção, remova o "|| true"
 
   plano:
     name: Plan comentado no PR
@@ -57,6 +64,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: opentofu/setup-opentofu@v1
+      - name: API do Podman (o runner ubuntu já traz o Podman; nada de Docker)
+        run: bash scripts/podman-api.sh
       - name: Plan do ambiente dev
         id: plan
         working-directory: terraform

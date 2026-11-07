@@ -1,6 +1,7 @@
 # Módulo "servico-web" - mantido pelo time de PLATAFORMA da VeloZ.
 # Os squads de produto consomem como "caixa-preta": informam nome, imagem e réplicas;
 # o módulo garante o padrão da empresa (rede, limites de memória, labels de custo, restart).
+# Testado com Podman 4.9 via API compatível (scripts/podman-api.sh).
 
 terraform {
   required_providers {
@@ -31,6 +32,7 @@ resource "docker_container" "this" {
   name        = "${local.prefixo}-${count.index}"
   image       = docker_image.this.image_id
   restart     = "unless-stopped"
+  pid_mode    = "private" # valor que o Podman devolve; sem isto o plan acusa troca falsa
   memory      = var.memoria_mb
   memory_swap = var.memoria_mb # swap desligado: comportamento previsível sob carga
   env         = [for k, v in var.variaveis : "${k}=${v}"]
@@ -44,6 +46,7 @@ resource "docker_container" "this" {
     content {
       internal = var.porta_interna
       external = var.porta_externa_base + count.index
+      ip       = "" # Podman 4.x: "0.0.0.0" vira regra literal; vazio = todas as interfaces
     }
   }
 

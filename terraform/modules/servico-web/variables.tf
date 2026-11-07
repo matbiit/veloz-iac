@@ -21,7 +21,7 @@ variable "imagem" {
   type        = string
   validation {
     condition     = !endswith(var.imagem, ":latest") && strcontains(var.imagem, ":")
-    error_message = "Fixe a versão da imagem (ex.: nginx:1.27-alpine). 'latest' gera drift entre ambientes."
+    error_message = "Fixe a versão da imagem (ex.: docker.io/library/nginx:1.27-alpine). 'latest' gera drift entre ambientes."
   }
 }
 
@@ -52,8 +52,9 @@ variable "porta_externa_base" {
 }
 
 variable "memoria_mb" {
-  type    = number
-  default = 128
+  description = "Limite de memória em MB (null = sem limite)"
+  type        = number
+  default     = 128
 }
 
 variable "variaveis" {

@@ -1,0 +1,41 @@
+# Estado desejado da vitrine em PRODUÇÃO (repositório de deploy = fonte única da verdade).
+# É YAML de Kubernetes padrão: o mesmo arquivo roda num cluster (ArgoCD/Flux) ou,
+# na aula, com `podman kube play` (sem cluster e sem Docker).
+#
+# Para fazer deploy: altere este arquivo, abra um PR, faça merge. Ninguém roda comando em produção.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vitrine
+  labels:
+    app: vitrine
+    veloz.owner: squad-vitrine
+    veloz.cost_center: CC-1020-ECOMMERCE
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vitrine
+  template:
+    metadata:
+      labels:
+        app: vitrine
+    spec:
+      containers:
+        - name: web
+          image: docker.io/library/nginx:1.27-alpine
+          env:
+            - name: AMBIENTE
+              value: prod
+            - name: VERSAO
+              value: "1.4.0"
+          ports:
+            - containerPort: 80
+              hostPort: 8090
+          resources:
+            limits:
+              memory: 128Mi
+              cpu: 500m
+          securityContext:
+            privileged: false
+            allowPrivilegeEscalation: false
