@@ -102,7 +102,7 @@ ansible-playbook deploy_vitrine.yml --check --diff      # auditoria: aponta a r�
 ansible-playbook deploy_vitrine.yml                     # corrige: changed=1
 ansible-playbook deploy_vitrine.yml -e versao=1.5.0     # nova versão, uma réplica por vez
 ansible-playbook deploy_vitrine.yml -e estado=absent    # remove tudo
-podman run -d --name ghs-01 docker.io/library/python:3.12-slim sleep infinity   # um \"servidor\" Debian de laboratório
+podman run -d --name ghs-01 docker.io/library/python:3.12-slim sleep infinity   # um "servidor" Debian de laboratório
 ansible-playbook -i inventario-container.ini hardening.yml --check --diff --skip-tags pacotes   # caso GHS: auditoria
 podman rm -f -t 0 ghs-01
 ```
