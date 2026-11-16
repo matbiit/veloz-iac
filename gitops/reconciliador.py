@@ -53,8 +53,10 @@ def buscar(repo: str, ramo: str, destino: pathlib.Path) -> str:
 # ----------------------------------------------------------------------- 2. Política
 
 def politica_ok(manifesto: pathlib.Path, politicas: pathlib.Path | None) -> tuple[bool, str]:
-    if politicas is None or shutil.which("conftest") is None:
+    if politicas is None:                       # política desligada de propósito (--politicas '')
         return True, ""
+    if shutil.which("conftest") is None:        # fail-closed: sem juiz, nada é aplicado
+        return False, "conftest não encontrado no PATH (política não pôde ser avaliada)"
     r = sh("conftest", "test", "--no-color", "-p", str(politicas), "--namespace", "kubernetes", str(manifesto), checar=False)
     return r.returncode == 0, " | ".join(linha.strip() for linha in r.stdout.splitlines() if "FAIL" in linha)
 
