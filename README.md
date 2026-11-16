@@ -87,7 +87,7 @@ Estado remoto com lock (caso Axion): `terraform/backend.tf`.
 
 ```bash
 cd ansible
-ansible-playbook deploy_vitrine.yml                     # build da imagem + 2 réplicas (portas 8180, 8181): changed=3
+ansible-playbook deploy_vitrine.yml                     # rede + imagem + 2 réplicas (portas 8180, 8181): changed=3
 ansible-playbook deploy_vitrine.yml                     # changed=0 (idempotente)
 podman stop hml-vitrine-ansible-1                       # alguém "mexeu"
 ansible-playbook deploy_vitrine.yml --check --diff      # auditoria: aponta a réplica parada, sem alterar nada
@@ -113,12 +113,13 @@ Sem ambiente? Trilha de revisão: leia `infra-dados/main.tf` e responda no formu
 
 ```bash
 python gitops/reconciliador.py --repo . --intervalo 10        # em outro terminal; observa a branch main
-curl localhost:8090                                           # VeloZ vitrine - prod - 1.4.0
+curl -s localhost:8090 | grep -o '<title>.*</title>'         # <title>Welcome to nginx!</title>
+podman inspect vitrine-pod-web --format '{{range .Config.Env}}{{println .}}{{end}}' | grep VERSAO   # VERSAO=1.4.0
 ```
 | Faça | O agente mostra |
 |---|---|
 | `podman pod stop vitrine-pod` | `SELFHEAL` e recria o pod |
-| altere `VERSAO` para `"1.5.0"` em `gitops/apps/vitrine.yaml` e faça commit | `SYNC` e `curl` mostra 1.5.0 |
+| altere `VERSAO` para `"1.5.0"` em `gitops/apps/vitrine.yaml` e faça commit | `SYNC`; o `podman inspect` acima mostra `VERSAO=1.5.0` |
 | troque a imagem para `...nginx:latest` e faça commit | `BLOQUEADO ... [K8S-001]`; a versão anterior continua no ar |
 | `git revert HEAD` | volta ao estado aprovado |
 | `git rm gitops/apps/vitrine.yaml` e commit | `PRUNE`: o que saiu do Git sai do ambiente |
