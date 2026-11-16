@@ -19,14 +19,26 @@ PID_FILE="/tmp/podman-api.pid"
 if [[ "$(uname -s)" == "Darwin" ]]; then
   if [[ "${1:-}" == "--parar" ]]; then rm -f "$SOCK"; echo "Link $SOCK removido (a VM continua: podman machine stop)."; exit 0; fi
   [[ "${1:-}" == "--root" ]] && echo "ℹ️  No Mac, modo root é da VM: podman machine stop && podman machine set --rootful && podman machine start"
-  MAC_SOCK=$(podman machine inspect --format '{{.ConnectionInfo.PodmanSocket.Path}}' 2>/dev/null || true)
-  [[ -z "$MAC_SOCK" ]] && { echo "❌ Nenhuma podman machine encontrada. Rode: podman machine init && podman machine start"; exit 1; }
-  ln -sf "$MAC_SOCK" "$SOCK"
+  ESTADO=$(podman machine inspect --format '{{.State}}' 2>/dev/null | head -1 || true)
+  [[ -z "$ESTADO" ]] && { echo "❌ Nenhuma podman machine encontrada. Rode: podman machine init && podman machine start"; exit 1; }
+  [[ "$ESTADO" != "running" ]] && { echo "❌ A podman machine está '$ESTADO'. Rode: podman machine start"; exit 1; }
+
+  # 1º: o caminho que o próprio Podman informa; depois, os caminhos padrão do Podman 5 e do Podman 4
+  MAC_SOCK=$(podman machine inspect --format '{{.ConnectionInfo.PodmanSocket.Path}}' 2>/dev/null | head -1 || true)
+  if [[ ! -S "$MAC_SOCK" ]]; then
+    for c in "${TMPDIR%/}"/podman/*-api.sock "$HOME"/.local/share/containers/podman/machine/*/podman.sock \
+             "$HOME"/.local/share/containers/podman/machine/*/*/podman.sock /var/run/docker.sock; do
+      [[ -S "$c" ]] && { MAC_SOCK="$c"; break; }
+    done
+  fi
+  [[ -S "$MAC_SOCK" ]] || { echo "❌ Socket da API não encontrado. Rode: podman machine inspect | grep -A2 PodmanSocket"; exit 1; }
+
+  ln -sfn "$MAC_SOCK" "$SOCK" || { echo "❌ Não consegui criar $SOCK. Use: export TF_VAR_container_host=unix://$MAC_SOCK"; exit 1; }
   if curl -fsS --unix-socket "$SOCK" http://podman/v1.41/version >/dev/null; then
     echo "✅ API do Podman em unix://$SOCK (-> $MAC_SOCK)"
     echo "   Terraform: já é o default de var.container_host"
   else
-    echo "❌ A API não respondeu. A VM está ligada? podman machine start"; exit 1
+    echo "❌ A API não respondeu em $MAC_SOCK. Tente: podman machine stop && podman machine start"; exit 1
   fi
   exit 0
 fi
