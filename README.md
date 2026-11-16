@@ -51,7 +51,15 @@ curl -sSL https://github.com/open-policy-agent/conftest/releases/download/v0.62.
 podman pull docker.io/library/nginx:1.27-alpine docker.io/library/redis:7.4-alpine
 bash scripts/podman-api.sh                  # API do Podman para o Terraform (use --root se o rootless falhar)
 ```
-**macOS/Windows:** Podman Desktop + `podman machine init && podman machine start`; o socket aparece em `podman machine inspect`.
+**macOS (Intel ou Apple Silicon):**
+```bash
+brew install podman gh conftest checkov ansible opentofu      # ou: brew tap hashicorp/tap && brew install hashicorp/tap/terraform
+podman machine init --cpus 4 --memory 8192 && podman machine start
+python3 -m venv .venv && source .venv/bin/activate && pip install pyyaml   # só para o agente GitOps
+podman pull docker.io/library/nginx:1.27-alpine docker.io/library/redis:7.4-alpine docker.io/library/python:3.12-slim
+bash scripts/podman-api.sh      # no Mac, só liga /tmp/podman.sock ao socket da podman machine
+```
+No macOS, use `sed -i ''` (com aspas vazias) nos comandos de edição do Tutorial 5.
 Se o seu ambiente rootless não tiver delegação de cgroup (erro de limite de memória), use `-var limitar_memoria=false`.
 
 ---
@@ -94,7 +102,9 @@ ansible-playbook deploy_vitrine.yml --check --diff      # auditoria: aponta a r�
 ansible-playbook deploy_vitrine.yml                     # corrige: changed=1
 ansible-playbook deploy_vitrine.yml -e versao=1.5.0     # nova versão, uma réplica por vez
 ansible-playbook deploy_vitrine.yml -e estado=absent    # remove tudo
-sudo ansible-playbook hardening.yml --check --diff      # caso GHS: baseline de segurança (use --skip-tags pacotes sem internet)
+podman run -d --name ghs-01 docker.io/library/python:3.12-slim sleep infinity   # um \"servidor\" Debian de laboratório
+ansible-playbook -i inventario-container.ini hardening.yml --check --diff --skip-tags pacotes   # caso GHS: auditoria
+podman rm -f -t 0 ghs-01
 ```
 
 ## Tutorial 4 — Políticas como código

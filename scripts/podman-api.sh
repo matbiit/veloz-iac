@@ -5,6 +5,7 @@
 #   bash scripts/podman-api.sh            # rootless (recomendado): containers do seu usuário
 #   bash scripts/podman-api.sh --root     # rootful, para ambientes sem suporte a rootless (ex.: alguns Codespaces)
 #   bash scripts/podman-api.sh --parar
+#   No macOS o script só liga /tmp/podman.sock ao socket da podman machine (nada roda em segundo plano).
 #
 # Em Linux com systemd, a alternativa "oficial" é:  systemctl --user enable --now podman.socket
 # (socket em unix://$XDG_RUNTIME_DIR/podman/podman.sock -> passe em -var container_host=...).
@@ -12,6 +13,23 @@ set -euo pipefail
 
 SOCK="${PODMAN_SOCK:-/tmp/podman.sock}"
 PID_FILE="/tmp/podman-api.pid"
+
+# macOS (e Windows): o Podman roda numa VM (podman machine) que já expõe a API num socket local.
+# Não há serviço a subir: basta apontar /tmp/podman.sock para esse socket.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  if [[ "${1:-}" == "--parar" ]]; then rm -f "$SOCK"; echo "Link $SOCK removido (a VM continua: podman machine stop)."; exit 0; fi
+  [[ "${1:-}" == "--root" ]] && echo "ℹ️  No Mac, modo root é da VM: podman machine stop && podman machine set --rootful && podman machine start"
+  MAC_SOCK=$(podman machine inspect --format '{{.ConnectionInfo.PodmanSocket.Path}}' 2>/dev/null || true)
+  [[ -z "$MAC_SOCK" ]] && { echo "❌ Nenhuma podman machine encontrada. Rode: podman machine init && podman machine start"; exit 1; }
+  ln -sf "$MAC_SOCK" "$SOCK"
+  if curl -fsS --unix-socket "$SOCK" http://podman/v1.41/version >/dev/null; then
+    echo "✅ API do Podman em unix://$SOCK (-> $MAC_SOCK)"
+    echo "   Terraform: já é o default de var.container_host"
+  else
+    echo "❌ A API não respondeu. A VM está ligada? podman machine start"; exit 1
+  fi
+  exit 0
+fi
 
 if [[ "${1:-}" == "--parar" ]]; then
   [[ -f "$PID_FILE" ]] && { sudo -n kill "$(cat "$PID_FILE")" 2>/dev/null || kill "$(cat "$PID_FILE")"; rm -f "$PID_FILE"; }
